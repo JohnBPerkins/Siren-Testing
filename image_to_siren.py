@@ -137,6 +137,13 @@ def gradient(y, x, grad_outputs=None):
 
 # SHOULDN'T NEED TO TOUCH ANYTHING ABOVE THIS LINE
 
+# Set random seeds for reproducibility
+def set_random_seeds(seed_value=0):
+    torch.manual_seed(seed_value)
+    np.random.seed(seed_value)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed_value)
+
 # This is the image used in the colab, we can modify to use mnist data here
 def get_cameraman_tensor(sidelength):
     img = Image.fromarray(skimage.data.camera())        
@@ -170,31 +177,38 @@ img_siren = Siren(in_features=2, out_features=1, hidden_features=256,
                   hidden_layers=3, outermost_linear=True)
 img_siren.cuda()
 
-total_steps = 500 # 500 gradient descent steps.
-steps_til_summary = 10
+# Create a new model for each seed.
+random_seeds = []
+for seed in random_seeds:
+    set_random_seeds(seed)
 
-optim = torch.optim.Adam(lr=1e-4, params=img_siren.parameters())
+    total_steps = 500 # 500 gradient descent steps.
+    steps_til_summary = 10
 
-model_input, ground_truth = next(iter(dataloader))
-model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
+    optim = torch.optim.Adam(lr=1e-4, params=img_siren.parameters())
 
-for step in range(total_steps):
-    model_output, coords = img_siren(model_input)    
-    loss = ((model_output - ground_truth)**2).mean()
-    
-    # Somewhere in here we can probably calculate PSNR and stop the training early.
+    model_input, ground_truth = next(iter(dataloader))
+    model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
 
-    if not step % steps_til_summary:
-        print("Step %d, Total loss %0.6f" % (step, loss))
-        img_grad = gradient(model_output, coords)
-        img_laplacian = laplace(model_output, coords)
+    for step in range(total_steps):
+        model_output, coords = img_siren(model_input)    
+        loss = ((model_output - ground_truth)**2).mean()
+        
+        # Somewhere in here we can probably calculate PSNR and stop the training early.
 
-        fig, axes = plt.subplots(1,3, figsize=(18,6))
-        axes[0].imshow(model_output.cpu().view(256,256).detach().numpy())
-        axes[1].imshow(img_grad.norm(dim=-1).cpu().view(256,256).detach().numpy())
-        axes[2].imshow(img_laplacian.cpu().view(256,256).detach().numpy())
-        plt.show()
+        if not step % steps_til_summary:
+            print("Step %d, Total loss %0.6f" % (step, loss))
+            img_grad = gradient(model_output, coords)
+            img_laplacian = laplace(model_output, coords)
 
-    optim.zero_grad()
-    loss.backward()
-    optim.step()
+            fig, axes = plt.subplots(1,3, figsize=(18,6))
+            axes[0].imshow(model_output.cpu().view(256,256).detach().numpy())
+            axes[1].imshow(img_grad.norm(dim=-1).cpu().view(256,256).detach().numpy())
+            axes[2].imshow(img_laplacian.cpu().view(256,256).detach().numpy())
+            plt.show()
+
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
+
+        # Save model output somewhere
