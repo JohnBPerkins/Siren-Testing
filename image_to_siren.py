@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -7,6 +8,12 @@ from PIL import Image
 from torchvision import datasets, transforms
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import numpy as np
+import matplotlib.pyplot as plt
+
+plot_dir = "/home/wchung25/Siren-Testing"
+
+if not os.path.exists(plot_dir):
+    os.makedirs(plot_dir)
 
 def psnr(pred, target, max_pixel=1.0):
     mse = F.mse_loss(pred, target)
@@ -74,8 +81,8 @@ first_image = mnist_data[0][0]
 class MNISTImageFitting(Dataset):
     def __init__(self, image):
         super().__init__()
-        self.coords = get_mgrid(28, 2)  # MNIST images are 28x28
-        self.pixels = image.view(-1, 1)  # Flatten image to fit the coords
+        self.coords = get_mgrid(28, 2)
+        self.pixels = image.view(-1, 1)
 
     def __len__(self):
         return 1
@@ -104,12 +111,14 @@ def train_model_with_seed(seed, total_steps=500):
     initial_weights_norm = torch.norm(torch.cat([p.data.flatten() for p in model.parameters()]))
     
     optimizer = torch.optim.Adam(lr=1e-4, params=model.parameters())
+    losses = []
+    psnr_values = []
     
     for step in range(total_steps):
         for model_input, ground_truth in dataloader:
             model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
             model_output = model(model_input)
-            loss = ((model_output - ground_truth)**2).mean()
+            loss = F.mse_loss(model_output, ground_truth)
 
             optimizer.zero_grad()
             loss.backward()
@@ -118,18 +127,43 @@ def train_model_with_seed(seed, total_steps=500):
         # Print loss every 10 steps
         if step % 10 == 0:  
                 current_psnr = psnr(model_output, ground_truth)
+                losses.append(loss.item())
+                psnr_values.append(current_psnr.item())
                 print(f"Step {step}: Loss {loss.item()}, PSNR: {current_psnr.item()}")
 
     # Store final norm
     final_weights_norm = torch.norm(torch.cat([p.data.flatten() for p in model.parameters()]))
     
-    return initial_weights_norm.item(), final_weights_norm.item()
+    return initial_weights_norm, final_weights_norm, losses, psnr_values
 
 # Run the training with multiple seeds
 results = {}
 for seed in range(10):  # 10 different initializations
     results[seed] = train_model_with_seed(seed)
 
-# Print out the norms before and after training
-for seed, (initial_norm, final_norm) in results.items():
+# Plotting and saving results for each seed
+for seed, (initial_norm, final_norm, losses, psnr_values) in results.items():
     print(f"Seed {seed}: Initial Norm = {initial_norm}, Final Norm = {final_norm}")
+    
+    plt.figure(figsize=(12, 6))
+    plt.subplot(1, 2, 1)
+    plt.plot(losses, label='Loss')
+    plt.title(f'Loss over Iterations for Seed {seed}')
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.legend()
+    loss_plot_path = os.path.join(plot_dir, f"loss_plot_seed_{seed}.png")
+    plt.savefig(loss_plot_path)
+    plt.close()
+
+    plt.subplot(1, 2, 1)
+    plt.plot(psnr_values, label='PSNR', color='orange')
+    plt.title(f'PSNR over Iterations for Seed {seed}')
+    plt.xlabel('Iteration')
+    plt.ylabel('PSNR (dB)')
+    plt.legend()
+    psnr_plot_path = os.path.join(plot_dir, f"psnr_plot_seed_{seed}.png")
+    plt.savefig(psnr_plot_path)
+    plt.close()
+
+    print(f"Plots for seed {seed} saved: {loss_plot_path} and {psnr_plot_path}")
