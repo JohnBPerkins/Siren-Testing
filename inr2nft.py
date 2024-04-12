@@ -8,6 +8,7 @@ from PIL import Image
 from torchvision import datasets, transforms
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import numpy as np
+from tqdm import tqdm
 
 def psnr(pred, target, max_pixel=1.0):
     mse = F.mse_loss(pred, target)
@@ -130,7 +131,7 @@ def train_model_with_seed(seed, total_steps=350):
     optimizer = torch.optim.Adam(lr=1e-4, params=model.parameters())
     final_features = None
     
-    for step in range(total_steps):
+    for step in tqdm(range(total_steps), desc=f'Training Seed {seed}'):
         for model_input, ground_truth in dataloader:
             model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
             
@@ -149,7 +150,7 @@ def train_model_with_seed(seed, total_steps=350):
 
 # Run the training with multiple seeds
 results = {}
-for seed in range(10):  # 10 different initializations
+for seed in tqdm(range(10), desc='Processing Seeds'):  # 10 different initializations
     results[seed] = train_model_with_seed(seed)
     
 # Assuming the features are extracted and the NFT is defined and instantiated
@@ -162,7 +163,7 @@ for seed, features in results.items():
     print("Features shape:", features.shape)
     transformed_features = nft(features.cuda())
     print("Transformed features shape:", transformed_features.shape)
-    norms[seed] = torch.norm(transformed_features, dim=1).cpu().numpy()  # Store norms for each seed
+    norms[seed] = torch.norm(transformed_features, dim=1).detach().cpu().numpy()
 
 # Print or process norms
 for seed, norm_values in norms.items():
