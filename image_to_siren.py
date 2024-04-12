@@ -100,7 +100,7 @@ img_siren = Siren(in_features=2, out_features=1, hidden_features=256, hidden_lay
 img_siren.cuda()
 
 # Define seed setting and train for different initializations
-def train_model_with_seed(seed, total_steps=500):
+def train_model_with_seed(seed, total_steps=350):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -131,6 +131,31 @@ def train_model_with_seed(seed, total_steps=500):
                 psnr_values.append(current_psnr.item())
                 print(f"Step {step}: Loss {loss.item()}, PSNR: {current_psnr.item()}")
 
+    # For the comparison image
+    model_output = model(model_input).detach().cpu().view(28, 28)
+    ground_truth = ground_truth.detach().cpu().view(28, 28)  # Reshape ground truth to image dimensions
+
+    # Normalize the output for display
+    model_output_norm = (model_output - model_output.min()) / (model_output.max() - model_output.min())
+    ground_truth_norm = (ground_truth - ground_truth.min()) / (ground_truth.max() - ground_truth.min())
+
+    # Create a figure with subplots
+    plt.figure(figsize=(6, 3))
+    plt.subplot(1, 2, 1)
+    plt.imshow(model_output_norm, cmap='gray')
+    plt.title('Regenerated Image')
+    plt.axis('off')
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(ground_truth_norm, cmap='gray')
+    plt.title('Ground Truth Image')
+    plt.axis('off')
+
+    # Save the comparison image
+    output_path = os.path.join(plot_dir, f'comparison_image_seed_{seed}.png')
+    plt.savefig(output_path)
+    plt.close()
+    
     # Store final norm
     final_weights_norm = torch.norm(torch.cat([p.data.flatten() for p in model.parameters()]))
     
@@ -145,11 +170,13 @@ for seed in range(10):  # 10 different initializations
 for seed, (initial_norm, final_norm, losses, psnr_values) in results.items():
     print(f"Seed {seed}: Initial Norm = {initial_norm}, Final Norm = {final_norm}")
     
+    iterations = [10 * i for i in range(len(losses))]
+    
     plt.figure(figsize=(12, 6))
     plt.subplot(1, 2, 1)
-    plt.plot(losses, label='Loss')
+    plt.plot(iterations, losses, label='Loss')
     plt.title(f'Loss over Iterations for Seed {seed}')
-    plt.xlabel('Iteration')
+    plt.xlabel('Iteration (every 10th)')
     plt.ylabel('Loss')
     plt.legend()
     loss_plot_path = os.path.join(plot_dir, f"loss_plot_seed_{seed}.png")
@@ -157,9 +184,9 @@ for seed, (initial_norm, final_norm, losses, psnr_values) in results.items():
     plt.close()
 
     plt.subplot(1, 2, 1)
-    plt.plot(psnr_values, label='PSNR', color='orange')
+    plt.plot(iterations, psnr_values, label='PSNR', color='orange')
     plt.title(f'PSNR over Iterations for Seed {seed}')
-    plt.xlabel('Iteration')
+    plt.xlabel('Iteration (every 10th)')
     plt.ylabel('PSNR (dB)')
     plt.legend()
     psnr_plot_path = os.path.join(plot_dir, f"psnr_plot_seed_{seed}.png")
