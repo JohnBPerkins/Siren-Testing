@@ -3,6 +3,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from PIL import Image
+from torchvision import datasets, transforms
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import numpy as np
 import skimage
@@ -18,24 +19,12 @@ def get_mgrid(sidelen, dim=2):
     return mgrid
 
 class SineLayer(nn.Module):
-    # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of omega_0.
-    
-    # If is_first=True, omega_0 is a frequency factor which simply multiplies the activations before the 
-    # nonlinearity. Different signals may require different omega_0 in the first layer - this is a 
-    # hyperparameter.
-    
-    # If is_first=False, then the weights will be divided by omega_0 so as to keep the magnitude of 
-    # activations constant, but boost gradients to the weight matrix (see supplement Sec. 1.5)
-    
-    def __init__(self, in_features, out_features, bias=True,
-                 is_first=False, omega_0=30):
+    def __init__(self, in_features, out_features, bias=True, is_first=False, omega_0=30):
         super().__init__()
         self.omega_0 = omega_0
         self.is_first = is_first
-        
         self.in_features = in_features
         self.linear = nn.Linear(in_features, out_features, bias=bias)
-        
         self.init_weights()
     
     def init_weights(self):
@@ -50,165 +39,91 @@ class SineLayer(nn.Module):
     def forward(self, input):
         return torch.sin(self.omega_0 * self.linear(input))
     
-    def forward_with_intermediate(self, input): 
-        # For visualization of activation distributions
-        intermediate = self.omega_0 * self.linear(input)
-        return torch.sin(intermediate), intermediate
-    
     
 class Siren(nn.Module):
     def __init__(self, in_features, hidden_features, hidden_layers, out_features, outermost_linear=False, 
                  first_omega_0=30, hidden_omega_0=30.):
         super().__init__()
-        
-        self.net = []
-        self.net.append(SineLayer(in_features, hidden_features, 
-                                  is_first=True, omega_0=first_omega_0))
-
+        self.net = [SineLayer(in_features, hidden_features, is_first=True, omega_0=first_omega_0)]
         for i in range(hidden_layers):
-            self.net.append(SineLayer(hidden_features, hidden_features, 
-                                      is_first=False, omega_0=hidden_omega_0))
-
+            self.net.append(SineLayer(hidden_features, hidden_features, is_first=False, omega_0=hidden_omega_0))
         if outermost_linear:
-            final_linear = nn.Linear(hidden_features, out_features)
-            
-            with torch.no_grad():
-                final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0, 
-                                              np.sqrt(6 / hidden_features) / hidden_omega_0)
-                
-            self.net.append(final_linear)
+            self.net.append(nn.Linear(hidden_features, out_features))
         else:
-            self.net.append(SineLayer(hidden_features, out_features, 
-                                      is_first=False, omega_0=hidden_omega_0))
-        
+            self.net.append(SineLayer(hidden_features, out_features, is_first=False, omega_0=hidden_omega_0))
         self.net = nn.Sequential(*self.net)
     
     def forward(self, coords):
-        coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
-        output = self.net(coords)
-        return output, coords        
+        coords = coords.clone().detach().requires_grad_(True)
+        return self.net(coords)
 
-    def forward_with_activations(self, coords, retain_grad=False):
-        '''Returns not only model output, but also intermediate activations.
-        Only used for visualizing activations later!'''
-        activations = OrderedDict()
+# Load MNIST Data
+transform = transforms.Compose([
+    transforms.Resize((28, 28)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5,), (0.5,))
+])
+mnist_data = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+first_image = mnist_data[0][0]
 
-        activation_count = 0
-        x = coords.clone().detach().requires_grad_(True)
-        activations['input'] = x
-        for i, layer in enumerate(self.net):
-            if isinstance(layer, SineLayer):
-                x, intermed = layer.forward_with_intermediate(x)
-                
-                if retain_grad:
-                    x.retain_grad()
-                    intermed.retain_grad()
-                    
-                activations['_'.join((str(layer.__class__), "%d" % activation_count))] = intermed
-                activation_count += 1
-            else: 
-                x = layer(x)
-                
-                if retain_grad:
-                    x.retain_grad()
-                    
-            activations['_'.join((str(layer.__class__), "%d" % activation_count))] = x
-            activation_count += 1
-
-        return activations
-    
-def laplace(y, x):
-    grad = gradient(y, x)
-    return divergence(grad, x)
-
-
-def divergence(y, x):
-    div = 0.
-    for i in range(y.shape[-1]):
-        div += torch.autograd.grad(y[..., i], x, torch.ones_like(y[..., i]), create_graph=True)[0][..., i:i+1]
-    return div
-
-
-def gradient(y, x, grad_outputs=None):
-    if grad_outputs is None:
-        grad_outputs = torch.ones_like(y)
-    grad = torch.autograd.grad(y, [x], grad_outputs=grad_outputs, create_graph=True)[0]
-    return grad
-
-# SHOULDN'T NEED TO TOUCH ANYTHING ABOVE THIS LINE
-
-# Set random seeds for reproducibility
-def set_random_seeds(seed_value=0):
-    torch.manual_seed(seed_value)
-    np.random.seed(seed_value)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed_value)
-
-# This is the image used in the colab, we can modify to use mnist data here
-def get_cameraman_tensor(sidelength):
-    img = Image.fromarray(skimage.data.camera())        
-    transform = Compose([
-        Resize(sidelength),
-        ToTensor(),
-        Normalize(torch.Tensor([0.5]), torch.Tensor([0.5]))
-    ])
-    img = transform(img)
-    return img
-
-class ImageFitting(Dataset):
-    def __init__(self, sidelength):
+# Prepare dataset
+class MNISTImageFitting(Dataset):
+    def __init__(self, image):
         super().__init__()
-        img = get_cameraman_tensor(sidelength)
-        self.pixels = img.permute(1, 2, 0).view(-1, 1)
-        self.coords = get_mgrid(sidelength, 2)
+        self.coords = get_mgrid(28, 2)  # MNIST images are 28x28
+        self.pixels = image.view(-1, 1)  # Flatten image to fit the coords
 
     def __len__(self):
         return 1
 
-    def __getitem__(self, idx):    
-        if idx > 0: raise IndexError
-            
+    def __getitem__(self, idx):
+        if idx > 0:
+            raise IndexError
         return self.coords, self.pixels
-    
-cameraman = ImageFitting(256)
-dataloader = DataLoader(cameraman, batch_size=1, pin_memory=True, num_workers=0)
 
-img_siren = Siren(in_features=2, out_features=1, hidden_features=256, 
-                  hidden_layers=3, outermost_linear=True)
+# Initialize dataset and dataloader
+mnist_image_dataset = MNISTImageFitting(first_image)
+dataloader = DataLoader(mnist_image_dataset, batch_size=1, pin_memory=True, num_workers=0)
+
+img_siren = Siren(in_features=2, out_features=1, hidden_features=256, hidden_layers=3, outermost_linear=True)
 img_siren.cuda()
 
-# Create a new model for each seed.
-random_seeds = []
-for seed in random_seeds:
-    set_random_seeds(seed)
+# Define seed setting and train for different initializations
+def train_model_with_seed(seed, total_steps=500):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
-    total_steps = 500 # 500 gradient descent steps.
-    steps_til_summary = 10
-
-    optim = torch.optim.Adam(lr=1e-4, params=img_siren.parameters())
-
-    model_input, ground_truth = next(iter(dataloader))
-    model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
-
+    # Initialize the model
+    model = Siren(in_features=2, out_features=1, hidden_features=256, hidden_layers=3, outermost_linear=True).cuda()
+    
+    # Store initial norm
+    initial_weights_norm = torch.norm(torch.cat([p.data.flatten() for p in model.parameters()]))
+    
+    optimizer = torch.optim.Adam(lr=1e-4, params=model.parameters())
+    
     for step in range(total_steps):
-        model_output, coords = img_siren(model_input)    
-        loss = ((model_output - ground_truth)**2).mean()
-        
-        # Somewhere in here we can probably calculate PSNR and stop the training early.
+        for model_input, ground_truth in dataloader:
+            model_input, ground_truth = model_input.cuda(), ground_truth.cuda()
+            model_output = model(model_input)
+            loss = ((model_output - ground_truth)**2).mean()
 
-        if not step % steps_til_summary:
-            print("Step %d, Total loss %0.6f" % (step, loss))
-            img_grad = gradient(model_output, coords)
-            img_laplacian = laplace(model_output, coords)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-            fig, axes = plt.subplots(1,3, figsize=(18,6))
-            axes[0].imshow(model_output.cpu().view(256,256).detach().numpy())
-            axes[1].imshow(img_grad.norm(dim=-1).cpu().view(256,256).detach().numpy())
-            axes[2].imshow(img_laplacian.cpu().view(256,256).detach().numpy())
-            plt.show()
+        if step % 10 == 0:  # Print loss every 10 steps
+            print(f"Step {step}: Loss {loss.item()}")
 
-        optim.zero_grad()
-        loss.backward()
-        optim.step()
+    # Store final norm
+    final_weights_norm = torch.norm(torch.cat([p.data.flatten() for p in model.parameters()]))
+    
+    return initial_weights_norm.item(), final_weights_norm.item()
 
-        # Save model output somewhere
+# Run the training with multiple seeds
+results = {}
+for seed in range(10):  # 10 different initializations
+    results[seed] = train_model_with_seed(seed)
+
+# Print out the norms before and after training
+for seed, (initial_norm, final_norm) in results.items():
+    print(f"Seed {seed}: Initial Norm = {initial_norm}, Final Norm = {final_norm}")
