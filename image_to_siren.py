@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
@@ -6,6 +7,11 @@ from PIL import Image
 from torchvision import datasets, transforms
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import numpy as np
+
+def psnr(pred, target, max_pixel=1.0):
+    mse = F.mse_loss(pred, target)
+    psnr = 20 * torch.log10(max_pixel / torch.sqrt(mse))
+    return psnr
 
 def get_mgrid(sidelen, dim=2):
     '''Generates a flattened grid of (x,y,...) coordinates in a range of -1 to 1.
@@ -109,8 +115,10 @@ def train_model_with_seed(seed, total_steps=500):
             loss.backward()
             optimizer.step()
 
-        if step % 10 == 0:  # Print loss every 10 steps
-            print(f"Step {step}: Loss {loss.item()}")
+        # Print loss every 10 steps
+        if step % 10 == 0:  
+                current_psnr = psnr(model_output, ground_truth)
+                print(f"Step {step}: Loss {loss.item()}, PSNR: {current_psnr.item()}")
 
     # Store final norm
     final_weights_norm = torch.norm(torch.cat([p.data.flatten() for p in model.parameters()]))
