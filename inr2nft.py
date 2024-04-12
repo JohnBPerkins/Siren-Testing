@@ -19,7 +19,7 @@ def get_mgrid(sidelen, dim=2):
     sidelen: int
     dim: int'''
     tensors = tuple(dim * [torch.linspace(-1, 1, steps=sidelen)])
-    mgrid = torch.stack(torch.meshgrid(*tensors), dim=-1)
+    mgrid = torch.stack(torch.meshgrid(*tensors, indexing='xy'), dim=-1)
     mgrid = mgrid.reshape(-1, dim)
     return mgrid
 
@@ -159,7 +159,9 @@ nft.cuda()
 # Process each seed's output through NFT and measure norms
 norms = {}
 for seed, features in results.items():
-    transformed_features = nft(features.cuda())  # Ensure features are on the correct device
+    print("Features shape:", features.shape)
+    transformed_features = nft(features.cuda())
+    print("Transformed features shape:", transformed_features.shape)
     norms[seed] = torch.norm(transformed_features, dim=1).cpu().numpy()  # Store norms for each seed
 
 # Print or process norms
