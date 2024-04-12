@@ -6,8 +6,6 @@ from PIL import Image
 from torchvision import datasets, transforms
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import numpy as np
-import skimage
-import matplotlib.pyplot as plt
 
 def get_mgrid(sidelen, dim=2):
     '''Generates a flattened grid of (x,y,...) coordinates in a range of -1 to 1.
