@@ -11,7 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-plot_dir = "/home/wchung25/Siren-Testing"
+plot_dir = "/home/jbperki3/Siren-Testing"
 if not os.path.exists(plot_dir):
     os.makedirs(plot_dir)
 
@@ -87,15 +87,16 @@ class MNISTImageFitting(Dataset):
 mnist_image_dataset = MNISTImageFitting(first_image)
 dataloader = DataLoader(mnist_image_dataset, batch_size=1, pin_memory=True, num_workers=0)
 
-img_siren = Siren(in_features=2, out_features=1, hidden_features=256, hidden_layers=3, outermost_linear=True).cuda()
-nft = NFT(input_channels=256, latent_dim=256).cuda()
-
 def train_and_transform(seed, total_steps=350):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+
+    img_siren = Siren(in_features=2, out_features=1, hidden_features=256, hidden_layers=3, outermost_linear=True).cuda()
+    nft = NFT(input_channels=256, latent_dim=256).cuda()
 
     optimizer = torch.optim.Adam(img_siren.parameters(), lr=1e-4)
-    initial_norm = torch.norm(torch.cat([p.data.flatten() for p in img_siren.parameters()]))
+    initial_norm = torch.linalg.norm(torch.cat([p.data.flatten() for p in img_siren.parameters()]), ord=2)
     losses = []
     psnr_values = []
 
@@ -113,7 +114,7 @@ def train_and_transform(seed, total_steps=350):
                 losses.append(loss.item())
                 psnr_values.append(current_psnr.item())
 
-    final_norm = torch.norm(torch.cat([p.data.flatten() for p in img_siren.parameters()]))
+    final_norm = torch.linalg.norm(torch.cat([p.data.flatten() for p in img_siren.parameters()]), ord=2)
     transformed_features = nft(features.cuda())
     norms = torch.norm(transformed_features, dim=1).detach().cpu().numpy()
 
