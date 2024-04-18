@@ -114,6 +114,12 @@ def train_and_transform(seed, total_steps=350):
                 losses.append(loss.item())
                 psnr_values.append(current_psnr.item())
 
+                if current_psnr > 150:
+                    break
+        else:
+            continue
+        break
+
     final_norm = torch.linalg.norm(torch.cat([p.data.flatten() for p in img_siren.parameters()]), ord=2)
     transformed_features = nft(features.cuda())
     norms = torch.norm(transformed_features, dim=1).detach().cpu().numpy()
@@ -125,4 +131,4 @@ for seed in range(10):
     results[seed] = train_and_transform(seed)
 
 for seed, (initial_norm, final_norm, losses, psnr_values, norms) in results.items():
-    print(f"Seed {seed}: Initial Norm = {initial_norm}, Final Norm = {final_norm}, NFT Norms = {norms}")
+    print(f"Seed {seed}: Initial Norm = {initial_norm}, Final Norm = {final_norm}, NFT Norms = {norms}, INR PSNR = {psnr_values[-1]}")
